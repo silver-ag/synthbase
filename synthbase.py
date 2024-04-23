@@ -50,8 +50,9 @@ class Module:
         else:
             raise Exception(f"not a module: '{other_module}' ({type(other_module)})")
     def disconnect(self, input_name):
-        self.inputs[input_name].connection.connections.remove(self.inputs[input_name])
-        self.inputs[input_name].connection = None
+        if self.inputs[input_name].connection is not None:
+            self.inputs[input_name].connection.connections.remove(self.inputs[input_name])
+            self.inputs[input_name].connection = None
     def invoke(self, inputs, t):
         overall_inputs = {k:(inputs[k] if k in inputs else self.inputs[k].default) for k in self.inputs}
         outputs = self.f(t = t, **overall_inputs)
@@ -542,6 +543,7 @@ class PathGen(VisualModule):
     settings = {"resolution": ("enum", [100,200, 300],0),
                 "mode": ("enum", ["vertical", "horizontal", "boustro (h)", "boustro (v)", "spiral"], 0)}
     pointer = (0,0)
+    sidelen = 100 # used for spiral mode
     def f(self, t):
         x,y = self.pointer
         res = self.settings["resolution"].value
@@ -562,6 +564,37 @@ class PathGen(VisualModule):
             y = int((y + (1 if x % 2 == 0 else -1)) % res)
             if y == 0:
                 x = int((x + 1) % res)
+        elif mode == "spiral":
+            if x == int((res - self.sidelen)/2):
+                if y == int((res - self.sidelen)/2):
+                    self.sidelen = (self.sidelen - 1)
+                    if self.sidelen == 0:
+                        self.sidelen = res
+                    x = int((res - self.sidelen)/2)
+                    y = int((res - self.sidelen)/2)
+                    x += 1
+                else:
+                    y -= 1
+            elif y == int((res - self.sidelen)/2):
+                if x == self.sidelen + int((res - self.sidelen)/2):
+                    y += 1
+                else:
+                    x += 1
+            elif x == self.sidelen + int((res - self.sidelen)/2):
+                if y == self.sidelen + int((res - self.sidelen)/2):
+                    x -= 1
+                else:
+                    y += 1
+            elif y == self.sidelen + int((res - self.sidelen)/2):
+                if x == int((res - self.sidelen)/2):
+                    # this never actually happens, it's just here for clarity
+                    # when we reach (0,100) the first condition kicks in instead, which does the same thing
+                    y -= 1
+                else:
+                    x -= 1
+            else:
+                x = int((res - self.sidelen)/2)
+                y = int((res - self.sidelen)/2)
         self.pointer = (x,y)
         return {"x": (x/(res/2))-1, "y": (y/(res/2))-1}
 
