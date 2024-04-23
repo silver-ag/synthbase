@@ -249,6 +249,9 @@ class VisualModule(Module):
         return self.indices[kind]
     def mouse_click(self, pos):
         if pos[1] < self.y + self.titleheight:
+            if pos[0] > self.x + self.w - 20:
+                self.synth.remove_module(self)
+                return "module closed"
             return "drag bar"
         else:
             for widget in list(self.inputs.values()) + list(self.settings.values()) + list(self.outputs.values()):
@@ -257,7 +260,7 @@ class VisualModule(Module):
                     pos[1] > self.y + y and pos[1] < self.y +y + h):
                     return widget
     def draw(self, screen):
-        titlewidth = self.synth.font.size(self.name)[0] + 10
+        titlewidth = self.synth.font.size(self.name)[0] + 10 + 20
         titleheight = 30
         height = (titleheight +
                   max(sum([_input.get_rect()[3] for _input in self.inputs.values()]),
@@ -274,6 +277,8 @@ class VisualModule(Module):
         pygame.draw.rect(surface, (50,50,50), pygame.Rect(0, 0, width, titleheight))
         title = self.synth.font.render(self.name, True, (250,250,250))
         surface.blit(title, (5, 5))
+        pygame.draw.line(surface, (250, 250, 250), (width - 18, 2), (width - 2, 18))
+        pygame.draw.line(surface, (250, 250, 250), (width - 2, 2), (width - 18, 18))
         for _input in self.inputs.values():
             _input.draw(surface)
         for output in self.outputs.values():
@@ -286,8 +291,28 @@ class VisualModule(Module):
             
         
 
+class RightClickMenu:
+    location = (0,0)
+    def __init__(self, synth, library):
+        self.synth = synth
+        self.library = library
+        self.width = max([synth.smallfont.size(module.name)[0] for module in library]) + 10
+        self.height = 20 * len(library)
+    def draw_menu(self, surface):
+        x,y = self.location
+        pygame.draw.rect(surface, (70, 70, 70), pygame.Rect(x, y, self.width, self.height + 10))
+        for i in range(len(self.library)):
+            pygame.draw.rect(surface, (100,100,100), pygame.Rect(x+5, (20*i) + y + 5, self.width - 10, 18))
+            value_text = self.synth.smallfont.render(self.library[i].name, True, (250,250,250))
+            surface.blit(value_text, (x + 5, (20*i) + y + 8))
+    def menu_click(self, pos):
+        if pos[0] > self.location[0] and pos[0] < self.location[0] + self.width:
+            index = int((pos[1] - self.location[1])/20)
+            if index >=0 and index < len(self.library):
+                self.synth.create_module(self.library[index], location = self.location)
+
 class VisualSynth(Synth):
-    def __init__(self, rate = 10):
+    def __init__(self, library, rate = 10):
         super().__init__(rate = rate)
         self.font = pygame.font.Font(None, 24)
         self.smallfont = pygame.font.Font(None, 18)
@@ -295,6 +320,11 @@ class VisualSynth(Synth):
         self.connecting = None
         self.menu_open = None
         self.text_selection = None
+        self.right_click_menu = RightClickMenu(self, library)
+    def create_module(self, module, location = (0,0)):
+        module = super().create_module(module)
+        module.x = location[0]
+        module.y = location[1]        
     def render(self, size):
         surface = pygame.Surface(size)
         surface.fill("purple")
@@ -335,6 +365,11 @@ class VisualSynth(Synth):
                 if self.text_selection is not None:
                     self.text_selection.deselected()
                 self.text_selection = None
+
+                if mouseevent.button == 3: # right click
+                    self.menu_open = self.right_click_menu
+                    self.menu_open.location = mouseevent.pos
+                
                 module_found = False
                 for module in self.modules:
                     if (mouseevent.pos[0] > module.x and mouseevent.pos[0] < module.x + module.w and
@@ -547,16 +582,7 @@ class Multiply(VisualModule):
     def f(self, t, a, b):
         return {"product": a * b}
 
-synth = VisualSynth(rate = 100000)
-osc_a = synth.create_module(Osc)
-osc_b = synth.create_module(Osc)
-osc_b.x = 100
-vis = synth.create_module(SteeredVideoOut)
-vis.x = 300
-con = synth.create_module(Constant)
-con.x = 600
-pat = synth.create_module(PathGen)
-pat.y = 100
+synth = VisualSynth(library = [Osc, Constant, Add, Multiply, PathGen, SteeredVideoOut], rate = 100000)
 window(synth, 30)
 
 
