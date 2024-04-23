@@ -19,6 +19,7 @@ class Output:
         self.name = name
         self.type = _type
         self.value = None
+        self.connections = set() # we need to be able to follow connections both ways to extricate deleted modules
 
 class Setting:
     def __init__(self, module, name, default):
@@ -45,15 +46,21 @@ class Module:
     def connect_from(self, input_name, other_module, output_name):
         if isinstance(other_module, Module):
             self.inputs[input_name].connection = other_module.outputs[output_name]
+            other_module.outputs[output_name].connections.add(self.inputs[input_name])
         else:
             raise Exception(f"not a module: '{other_module}' ({type(other_module)})")
     def disconnect(self, input_name):
+        self.inputs[input_name].connection.connections.remove(self.inputs[input_name])
         self.inputs[input_name].connection = None
     def invoke(self, inputs, t):
         overall_inputs = {k:(inputs[k] if k in inputs else self.inputs[k].default) for k in self.inputs}
         outputs = self.f(t = t, **overall_inputs)
         for output, value in outputs.items():
             self.outputs[output].value = value
+    def destroy(self):
+        for output in self.outputs.values():
+            for connection in set(output.connections): # need to copy output.connections so we don't alter its size while iterating over it
+                connection.module.disconnect(connection.name)
     def f(self, t, **inputs):
         print("Module.f must be shadowed with a function that does the operations of the module, taking named arguments for all the inputs plus a time t and returning a dict of output values")
 
@@ -68,6 +75,7 @@ class Synth:
     def remove_module(self, module):
         if module in self.modules:
             self.modules.remove(module)
+            module.destroy()
     def step(self, t):
         for module in self.modules:
             module.current_values = module.invoke({_input.name:_input.connection.value for _input in module.inputs.values() if _input.connection is not None}, t)
