@@ -138,7 +138,48 @@ class VisualEnumSetting(Setting):
             if index >=0 and index < len(self.options):
                 self.choice = index
     def get_rect(self):
-        return (20, 30 + (self.index*20), self.module.synth.smallfont.size(str(self.value))[0] + 20, 20)
+        return (max([_input.get_rect()[2] for _input in self.module.inputs.values()] + [0]),
+                30 + (self.index*20), self.module.synth.smallfont.size(str(self.value))[0] + 20, 20)
+
+class VisualTextSetting(Setting):
+    def __init__(self, module, name, default):
+        self.module = module
+        self.index = self.module.make_index('setting')
+        self.name = name
+        self.value = default
+        self.cursor = 0
+        self.is_selected = False
+    def draw(self, surface):
+        x,y,w,h = self.get_rect()
+        pygame.draw.rect(surface, (70,70,70), pygame.Rect(x, y+2, w, h-4))
+        value_text = self.module.synth.smallfont.render(str(self.value), True, (250,250,250))
+        surface.blit(value_text, (x+5,y+4))
+        if self.is_selected:
+            cursor_x = self.module.synth.smallfont.size(self.value[:self.cursor])[0]
+            pygame.draw.line(surface, (250,250,250), (cursor_x + x + 5, y + 3), (cursor_x + x + 5, y + h - 3))
+    def keypress(self, keyevent):
+        if keyevent.key == pygame.K_LEFT:
+            if self.cursor > 0:
+                self.cursor -= 1
+        elif keyevent.key == pygame.K_RIGHT:
+            if self.cursor < len(self.value):
+                self.cursor += 1
+        elif keyevent.key == pygame.K_BACKSPACE:
+            self.value = self.value[:self.cursor-1] + self.value[self.cursor:]
+            self.cursor -= 1
+        elif keyevent.key == pygame.K_DELETE:
+            self.value = self.value[:self.cursor] + self.value[self.cursor+1:]
+        else:
+            self.value = self.value[:self.cursor] + keyevent.unicode + self.value[self.cursor:]
+            self.cursor += 1
+    def selected(self):
+        self.is_selected = True
+        self.cursor = len(self.value)
+    def deselected(self):
+        self.is_selected = False
+    def get_rect(self):
+        return (max([_input.get_rect()[2] for _input in self.module.inputs.values()] + [0]),
+                30 + (self.index*20), self.module.synth.smallfont.size(str(self.value))[0] + 20, 20)
 
 class VisualTriggerSetting:
     def __init__(self, module, name, action):
@@ -154,7 +195,8 @@ class VisualTriggerSetting:
         value_text = self.module.synth.smallfont.render(str(self.name), True, (250,250,250))
         surface.blit(value_text, (x+5,y+4))
     def get_rect(self):
-        return (20, 30 + (self.index*20), self.module.synth.smallfont.size(str(self.name))[0] + 20, 20)
+        return (max([_input.get_rect()[2] for _input in self.module.inputs.values()] + [0]),
+                30 + (self.index*20), self.module.synth.smallfont.size(str(self.name))[0] + 20, 20)
 
 class Visualiser:
     def __init__(self, module, name, aspect_ratio, f):
@@ -192,9 +234,11 @@ class VisualModule(Module):
         new_settings = {}
         for name,config in self.settings.items():
            if config[0] == "enum":
-                new_settings[name] = VisualEnumSetting(self, name, config[1], config[2])
+               new_settings[name] = VisualEnumSetting(self, name, config[1], config[2])
            elif config[0] == "trig":
-                new_settings[name] = VisualTriggerSetting(self, name, config[1])
+               new_settings[name] = VisualTriggerSetting(self, name, config[1])
+           elif config[0] == "text":
+               new_settings[name] = VisualTextSetting(self, name, config[1])
         self.settings = new_settings
         self.visualiser = Visualiser(self, self.visualiser[0], self.visualiser[1], self.visualiser[2]) if self.visualiser is not None else None
     def make_index(self, kind):
@@ -250,6 +294,7 @@ class VisualSynth(Synth):
         self.dragging = None
         self.connecting = None
         self.menu_open = None
+        self.text_selection = None
     def render(self, size):
         surface = pygame.Surface(size)
         surface.fill("purple")
@@ -287,6 +332,9 @@ class VisualSynth(Synth):
                 self.menu_open = None
         else:
             if mouseevent.type == pygame.MOUSEBUTTONDOWN:
+                if self.text_selection is not None:
+                    self.text_selection.deselected()
+                self.text_selection = None
                 module_found = False
                 for module in self.modules:
                     if (mouseevent.pos[0] > module.x and mouseevent.pos[0] < module.x + module.w and
@@ -320,10 +368,18 @@ class VisualSynth(Synth):
                         elif isinstance(clicked_on, VisualTriggerSetting):
                             if not self.connecting:
                                 clicked_on.click()
+                        elif isinstance(clicked_on, VisualTextSetting):
+                            if self.text_selection is not None:
+                                self.text_selection.deselected()
+                            self.text_selection = clicked_on
+                            self.text_selection.selected()
                         module_found = True
                         break
                 if not module_found:
                     self.connecting = None
+    def key(self, keyevent):
+        if self.text_selection is not None:
+            self.text_selection.keypress(keyevent)
 
                                                 
         
@@ -344,6 +400,8 @@ def window(synth, framerate):
                 running = False
             if event.type in [pygame.MOUSEMOTION, pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP]:
                 synth.mouse(event)
+            if event.type == pygame.KEYDOWN:
+                synth.key(event)
 
         screen.blit(synth.render(screen.get_size()), (0,0))
 
@@ -437,7 +495,7 @@ class SteeredVideoOut(VisualModule):
 
 class PathGen(VisualModule):
     name = "Path Generator"
-    outputs = {"x": (float, 0.), "y": (float, 0.)}
+    outputs = {"x": float, "y": float}
     settings = {"resolution": ("enum", [100,200, 300],0),
                 "mode": ("enum", ["vertical", "horizontal", "boustro (h)", "boustro (v)", "spiral"], 0)}
     pointer = (0,0)
@@ -464,12 +522,30 @@ class PathGen(VisualModule):
         self.pointer = (x,y)
         return {"x": (x/(res/2))-1, "y": (y/(res/2))-1}
 
-class Magnitude(VisualModule):
-    name = "Magnitude"
-    outputs = {"out": (float, 0.)}
-    settings = {"value": ("enum", [0.0001, 0.001, 0.01, 0.1, 1, 10, 100, 1000, 10000], 4)}
+
+class Constant(VisualModule):
+    name = "Constant"
+    outputs = {"value": float}
+    settings = {"value": ("text", "0")}
     def f(self, t):
-        return {"out": self.settings["value"].value}
+        try:
+            return {"value": float(self.settings["value"].value)}
+        except:
+            return {"value": 0.}
+
+class Add(VisualModule):
+    name = "Add"
+    inputs = {"a": (float, 0.), "b": (float, 0.)}
+    outputs = {"sum": float}
+    def f(self, t, a, b):
+        return {"sum": a + b}
+
+class Multiply(VisualModule):
+    name = "Multiply"
+    inputs = {"a": (float, 1.), "b": (float, 1.)}
+    outputs = {"product": float}
+    def f(self, t, a, b):
+        return {"product": a * b}
 
 synth = VisualSynth(rate = 100000)
 osc_a = synth.create_module(Osc)
@@ -477,8 +553,8 @@ osc_b = synth.create_module(Osc)
 osc_b.x = 100
 vis = synth.create_module(SteeredVideoOut)
 vis.x = 300
-mag = synth.create_module(Magnitude)
-mag.x = 400
+con = synth.create_module(Constant)
+con.x = 600
 pat = synth.create_module(PathGen)
 pat.y = 100
 window(synth, 30)
