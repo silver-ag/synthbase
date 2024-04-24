@@ -330,6 +330,7 @@ class VisualSynth(Synth):
         self.connecting = None
         self.menu_open = None
         self.text_selection = None
+        self.tooltip_open = None
         self.right_click_menu = RightClickMenu(self, library)
     def create_module(self, module, location = (0,0)):
         module = super().create_module(module)
@@ -356,6 +357,14 @@ class VisualSynth(Synth):
             y += self.connecting.module.y
             mx,my = pygame.mouse.get_pos()
             pygame.draw.line(surface, (200,200,200), (x + (w/2), y + (h/2)), (mx, my))
+        if self.tooltip_open is not None:
+            x,y,w,h = self.tooltip_open.get_rect()
+            x += self.tooltip_open.module.x + (w/2)
+            y += self.tooltip_open.module.y + (h/2)
+            w,h = self.smallfont.size(self.tooltip_open.name)
+            pygame.draw.rect(surface, (170,170,170), pygame.Rect(x,y,w+10, h+10))
+            text = self.smallfont.render(self.tooltip_open.name, True, (0,0,0))
+            surface.blit(text, (x + 5, y + 5))
         if self.menu_open is not None:
             self.menu_open.draw_menu(surface)
         return surface
@@ -370,7 +379,13 @@ class VisualSynth(Synth):
             if mouseevent.type == pygame.MOUSEBUTTONDOWN:
                 self.menu_open.menu_click(mouseevent.pos)
                 self.menu_open = None
-        else:
+        else: 
+            module_found = None
+            for module in self.modules:
+                if (mouseevent.pos[0] > module.x and mouseevent.pos[0] < module.x + module.w and
+                    mouseevent.pos[1] > module.y and mouseevent.pos[1] < module.y + module.h):
+                    module_found = module
+                    break
             if mouseevent.type == pygame.MOUSEBUTTONDOWN:
                 if self.text_selection is not None:
                     self.text_selection.deselected()
@@ -379,49 +394,54 @@ class VisualSynth(Synth):
                 if mouseevent.button == 3: # right click
                     self.menu_open = self.right_click_menu
                     self.menu_open.location = mouseevent.pos
-                
-                module_found = False
-                for module in self.modules:
-                    if (mouseevent.pos[0] > module.x and mouseevent.pos[0] < module.x + module.w and
-                        mouseevent.pos[1] > module.y and mouseevent.pos[1] < module.y + module.h):
-                        clicked_on = module.mouse_click(mouseevent.pos)
-                        if clicked_on == 'drag bar':
-                            self.dragging = module
-                        elif isinstance(clicked_on, VisualInput):
-                            if self.connecting:
-                                if isinstance(self.connecting, VisualOutput):
-                                    if clicked_on.connection == self.connecting:
-                                        clicked_on.module.disconnect(clicked_on.name)
-                                    else:
-                                        clicked_on.module.connect_from(clicked_on.name, self.connecting.module, self.connecting.name)
-                                self.connecting = None
-                            else:
-                                self.connecting = clicked_on
-                        elif isinstance(clicked_on, VisualOutput):
-                            if self.connecting:
-                                if isinstance(self.connecting, VisualInput):
-                                    if self.connecting.connection == clicked_on:
-                                        self.connecting.module.disconnect(self.connecting.name)
-                                    else:
-                                        self.connecting.module.connect_from(self.connecting.name, clicked_on.module, clicked_on.name)
-                                self.connecting = None
-                            else:
-                                self.connecting = clicked_on
-                        elif isinstance(clicked_on, VisualEnumSetting):
-                            if not self.connecting:
-                                self.menu_open = clicked_on
-                        elif isinstance(clicked_on, VisualTriggerSetting):
-                            if not self.connecting:
-                                clicked_on.click()
-                        elif isinstance(clicked_on, VisualTextSetting):
-                            if self.text_selection is not None:
-                                self.text_selection.deselected()
-                            self.text_selection = clicked_on
-                            self.text_selection.selected()
-                        module_found = True
-                        break
-                if not module_found:
+
+                if module_found is not None:
+                    clicked_on = module.mouse_click(mouseevent.pos)
+                    if clicked_on == 'drag bar':
+                        self.dragging = module
+                    elif isinstance(clicked_on, VisualInput):
+                        if self.connecting:
+                            if isinstance(self.connecting, VisualOutput):
+                                if clicked_on.connection == self.connecting:
+                                    clicked_on.module.disconnect(clicked_on.name)
+                                else:
+                                    clicked_on.module.connect_from(clicked_on.name, self.connecting.module, self.connecting.name)
+                            self.connecting = None
+                        else:
+                            self.connecting = clicked_on
+                    elif isinstance(clicked_on, VisualOutput):
+                        if self.connecting:
+                            if isinstance(self.connecting, VisualInput):
+                                if self.connecting.connection == clicked_on:
+                                    self.connecting.module.disconnect(self.connecting.name)
+                                else:
+                                    self.connecting.module.connect_from(self.connecting.name, clicked_on.module, clicked_on.name)
+                            self.connecting = None
+                        else:
+                            self.connecting = clicked_on
+                    elif isinstance(clicked_on, VisualEnumSetting):
+                        if not self.connecting:
+                            self.menu_open = clicked_on
+                    elif isinstance(clicked_on, VisualTriggerSetting):
+                        if not self.connecting:
+                            clicked_on.click()
+                    elif isinstance(clicked_on, VisualTextSetting):
+                        if self.text_selection is not None:
+                            self.text_selection.deselected()
+                        self.text_selection = clicked_on
+                        self.text_selection.selected()
+                else:
                     self.connecting = None
+            elif mouseevent.type == pygame.MOUSEMOTION:
+                if module_found:
+                    self.tooltip_open = None
+                    for widget in list(module_found.inputs.values()) + list(module_found.settings.values()) + list(module_found.outputs.values()):
+                        x,y,w,h = widget.get_rect()
+                        if (mouseevent.pos[0] > module.x + x and mouseevent.pos[0] < module.x + x + w and
+                            mouseevent.pos[1] > module.y + y and mouseevent.pos[1] < module.y + y + h):
+                            self.tooltip_open = widget
+                else:
+                    self.tooltip_open = None
     def key(self, keyevent):
         if self.text_selection is not None:
             self.text_selection.keypress(keyevent)
