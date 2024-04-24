@@ -503,42 +503,10 @@ class LightVis(VisualModule):
 
 def videoout_f(surface, inputs, outputs, module):
     return module.screenbuffer
-class VideoOut(VisualModule):
-    global sweeps
-    name = "--------------- Video Output ---------------"
-    inputs = {"r": (float, 0.), "g": (float, 0.), "b": (float, 0.)}
-    settings = {"path": ("enum", ["horizontal", "vertical"], 0),
-                "pixel size": ("enum", [1,2,3,4], 0)}
-    visualiser = ("output", (1,1), videoout_f)
-    pointer = (0,0)
-    def __init__(self, synth):
-        super().__init__(synth)
-        _,_,w,h = self.visualiser.get_rect()
-        self.screenbuffer = pygame.Surface((w,h))
-    def f(self, t, r, g, b):
-        pixelsize = self.settings["pixel size"].value
-        x,y = self.pointer
-        _,_,w,h = self.visualiser.get_rect()
-        buffer_w, buffer_h = self.screenbuffer.get_size()
-        if buffer_w != w or buffer_h != h:
-            self.screenbuffer = pygame.Surface((w,h))
-        if self.settings["path"].value == "horizontal":
-            x = int((x + 1) % math.ceil(w/pixelsize)) if w > 0 else 0
-            if x == 0:
-                y = int((y + 1) % math.ceil(h/pixelsize)) if h > 0 else 0
-        elif self.settings["path"].value == "vertical":
-            y = int((y + 1) % h) if h > 0 else 0
-            if y == 0:
-                x = int((x + 1) % w) if w > 0 else 0
-        self.pointer = (x,y)
-        pygame.draw.rect(self.screenbuffer, (127+int(r*127),127+int(g*127),127+int(b*127)),
-                         (x*pixelsize, y*pixelsize, pixelsize, pixelsize))
-        return {}
-
 def resetscreenbuffer(module):
     _,_,w,h = module.visualiser.get_rect()
     module.screenbuffer = pygame.Surface((w,h))
-class SteeredVideoOut(VisualModule):
+class VideoOut(VisualModule):
     name = "--------------- Video Output ---------------"
     inputs = {"x": (float, 0.), "y": (float, 0.), "r": (float, 0.), "g": (float, 0.), "b": (float, 0.)}
     settings = {"pixel size": ("enum", [1,2,3,4], 0),
@@ -561,13 +529,17 @@ class SteeredVideoOut(VisualModule):
 class PathGen(VisualModule):
     name = "Path Generator"
     outputs = {"x": float, "y": float}
-    settings = {"resolution": ("enum", [100,200, 300],0),
+    settings = {"resolution": ("text", "100"),
                 "mode": ("enum", ["vertical", "horizontal", "boustro (v)", "boustro (h)", "spiral"], 0)}
     pointer = (0,0)
     sidelen = 100 # used for spiral mode
     def f(self, t):
         x,y = self.pointer
-        res = self.settings["resolution"].value
+        try:
+            res = int(self.settings["resolution"].value)
+            1/res # to make sure res isn't 0
+        except:
+            res = 100
         mode = self.settings["mode"].value
         if mode == "horizontal":
             x = int((x + 1) % res)
@@ -711,7 +683,7 @@ class ADSR(VisualModule):
         return {"envelope": v}
             
 
-synth = VisualSynth(library = [Osc, Constant, Add, Multiply, EvalExpr, Threshold, Choice, ADSR, PathGen, SteeredVideoOut], rate = 100000)
+synth = VisualSynth(library = [Osc, Constant, Add, Multiply, EvalExpr, Threshold, Choice, ADSR, PathGen, VideoOut], rate = 100000)
 window(synth, 30)
 
 
