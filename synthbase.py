@@ -62,6 +62,8 @@ class Module:
         for output in self.outputs.values():
             for connection in set(output.connections): # need to copy output.connections so we don't alter its size while iterating over it
                 connection.module.disconnect(connection.name)
+    def setting_changed(self):
+        pass # for settings to signal when they've been changed, in case we need to do something about that like only processing them after they're changed for performance reasons
     def f(self, t, **inputs):
         print("Module.f must be shadowed with a function that does the operations of the module, taking named arguments for all the inputs plus a time t and returning a dict of output values")
 
@@ -175,12 +177,14 @@ class VisualTextSetting(Setting):
                 self.cursor += 1
         elif keyevent.key == pygame.K_BACKSPACE:
             self.value = self.value[:self.cursor-1] + self.value[self.cursor:]
-            self.cursor -= 1
+            if self.cursor > 0:
+                self.cursor -= 1
         elif keyevent.key == pygame.K_DELETE:
             self.value = self.value[:self.cursor] + self.value[self.cursor+1:]
         else:
             self.value = self.value[:self.cursor] + keyevent.unicode + self.value[self.cursor:]
-            self.cursor += 1
+            self.cursor += len(keyevent.unicode)
+        self.module.setting_changed()
     def selected(self):
         self.is_selected = True
         self.cursor = len(self.value)
@@ -623,7 +627,73 @@ class Multiply(VisualModule):
     def f(self, t, a, b):
         return {"product": a * b}
 
-synth = VisualSynth(library = [Osc, Constant, Add, Multiply, PathGen, SteeredVideoOut], rate = 100000)
+class EvalExpr(VisualModule):
+    name = "Expression"
+    inputs = {"x": (float, 0.), "y": (float, 0.), "z": (float, 0.)}
+    outputs = {"value": float}
+    settings = {"expression": ("text", "x + y + z")}
+    compiled_expression = compile("x + y + z", "<user-defined expression>", "eval")
+    def f(self, t, x, y, z):
+        try:
+            return {"value": eval(self.compiled_expression, {"x": x, "y": y, "z": z, "math": math})}
+        except:
+            return {"value": 0.}
+    def setting_changed(self):
+        try:
+            self.compiled_expression = compile(self.settings["expression"].value, "<user-defined expression>", "eval")
+        except:
+            pass
+        
+
+class Threshold(VisualModule):
+    name = "Threshold"
+    inputs = {"value": (float, 0.), "threshold": (float, 0.)}
+    outputs = {"gate": bool}
+    def f(self, t, value, threshold):
+        return {"gate": value > threshold}
+
+class Choice(VisualModule):
+    name = "Choice"
+    inputs = {"gate": (bool, True), "a": (float, 0.), "b": (float, 0.)}
+    outputs = {"out": float}
+    def f(self, t, gate, a, b):
+        return {"out": a if gate else b}
+
+def adsr_trigger(module):
+    module.manually_triggered = True
+class ADSR(VisualModule):
+    name = "ADSR"
+    inputs = {"gate": (bool, False)}
+    outputs = {"envelope": float}
+    settings = {"attack": ("text", "10000"), "decay": ("text", "10000"), "sustain": ("text", "10000"), "release": ("text", "10000"),
+                "trigger": ("trig", adsr_trigger)}
+    prev_gate = False
+    trigger_time = 0
+    manually_triggered = False
+    def f(self, t, gate):
+        if (gate == True and self.prev_gate == False) or self.manually_triggered:
+            self.trigger_time = t
+            self.manually_triggered = False
+        self.prev_gate = gate
+        try:
+            a,d,s,r = int(self.settings["attack"].value), int(self.settings["decay"].value), int(self.settings["sustain"].value), int(self.settings["release"].value)
+        except:
+            return {"envelope": 0}
+        progress = t - self.trigger_time
+        if progress < a:
+            v = progress/a
+        elif progress < a+d:
+            v = 1 - (0.5*((progress - a)/d))
+        elif progress < a+d+s:
+            v = 0.5
+        elif progress < a+d+s+r:
+            v = 0.5 - (0.5*((progress - (a+d+s))/r))
+        else:
+            v = 0
+        return {"envelope": v}
+            
+
+synth = VisualSynth(library = [Osc, Constant, Add, Multiply, EvalExpr, Threshold, Choice, ADSR, PathGen, SteeredVideoOut], rate = 100000)
 window(synth, 30)
 
 
