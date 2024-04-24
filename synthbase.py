@@ -317,7 +317,7 @@ class RightClickMenu:
             surface.blit(value_text, (x + 5, (20*i) + y + 8))
     def menu_click(self, pos):
         if pos[0] > self.location[0] and pos[0] < self.location[0] + self.width:
-            index = int((pos[1] - self.location[1])/20)
+            index = int((pos[1] - (self.location[1] + 5))/20)
             if index >=0 and index < len(self.library):
                 self.synth.create_module(self.library[index], location = self.location)
 
@@ -682,7 +682,7 @@ class ADSR(VisualModule):
     name = "ADSR"
     inputs = {"gate": (bool, False)}
     outputs = {"envelope": float}
-    settings = {"attack": ("text", "10000"), "decay": ("text", "10000"), "sustain": ("text", "10000"), "release": ("text", "10000"),
+    settings = {"attack": ("text", "0.25"), "decay": ("text", "0.25"), "sustain": ("text", "0.25"), "release": ("text", "0.25"),
                 "trigger": ("trig", adsr_trigger)}
     prev_gate = False
     trigger_time = 0
@@ -693,7 +693,8 @@ class ADSR(VisualModule):
             self.manually_triggered = False
         self.prev_gate = gate
         try:
-            a,d,s,r = int(self.settings["attack"].value), int(self.settings["decay"].value), int(self.settings["sustain"].value), int(self.settings["release"].value)
+            a,d,s,r = (float(self.settings["attack"].value), float(self.settings["decay"].value),
+                       float(self.settings["sustain"].value), float(self.settings["release"].value))
         except:
             return {"envelope": 0}
         progress = t - self.trigger_time
