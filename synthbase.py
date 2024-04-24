@@ -82,12 +82,9 @@ class Synth:
     def step(self, t):
         for module in self.modules:
             module.current_values = module.invoke({_input.name:_input.connection.value for _input in module.inputs.values() if _input.connection is not None}, t)
-    def run(self, n, t = 0):
-        # -1 to run unboundedly
-        while n != 0:
-            self.step(t)
-            t += 1
-            n -= 1
+    def run(self, n, t_from, t_to):
+        for i in range(n):
+            self.step(t_from + ((t_to/n)*i))
 
 
 
@@ -439,8 +436,8 @@ def window(synth, framerate):
     t = 0
     while running:
         # do the right amount of iterations to have the specified synth sample rate. rounding errors are possible, which may matter for audio
-        synth.run(math.ceil(synth.rate / framerate), t = t)
-        t += math.ceil(synth.rate / framerate)
+        synth.run(math.ceil(synth.rate / framerate), t, 1/framerate)
+        t += 1/framerate
 
         # poll for events
         for event in pygame.event.get():
@@ -465,14 +462,14 @@ def window(synth, framerate):
 # test modules
 class Osc(VisualModule):
     name = "Osc"
-    inputs = {"frequency": (float, 1.)}
+    inputs = {"frequency": (float, 1.), "phase": (float, 0.)}
     outputs = {"out": float}
     settings = {"waveform": ("enum", ["sin", "tri", "saw", "squ"], 0)}
-    def f(self, t, frequency):
-        return {"out": {"sin": math.sin,
-                        "tri": lambda x: abs((((2*x)/math.pi)%4)-2)-1,
-                        "saw": lambda x: (abs(x/math.pi)%2)-1,
-                        "squ": lambda x: 1 if (x%(math.pi*2)) < math.pi else -1}[self.settings["waveform"].value](t*frequency)}
+    def f(self, t, frequency, phase):
+        return {"out": {"sin": lambda x: math.sin(2 * math.pi * x),
+                        "tri": lambda x: abs(((4*x)%4)-2)-1,
+                        "saw": lambda x: (abs(2*x)%2)-1,
+                        "squ": lambda x: 1 if (x%1) < 0.5 else -1}[self.settings["waveform"].value]((t + phase)*frequency)}
 
 def lightvis_f(surface, inputs, outputs, module):
     surface.fill((127+int(inputs['value']*127),0,0))
@@ -545,7 +542,7 @@ class PathGen(VisualModule):
     name = "Path Generator"
     outputs = {"x": float, "y": float}
     settings = {"resolution": ("enum", [100,200, 300],0),
-                "mode": ("enum", ["vertical", "horizontal", "boustro (h)", "boustro (v)", "spiral"], 0)}
+                "mode": ("enum", ["vertical", "horizontal", "boustro (v)", "boustro (h)", "spiral"], 0)}
     pointer = (0,0)
     sidelen = 100 # used for spiral mode
     def f(self, t):
