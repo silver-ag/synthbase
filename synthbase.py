@@ -539,7 +539,7 @@ class PathGen(VisualModule):
             res = int(self.settings["resolution"].value)
             1/res # to make sure res isn't 0
         except:
-            res = 100
+            res = 1
         mode = self.settings["mode"].value
         if mode == "horizontal":
             x = int((x + 1) % res)
@@ -681,9 +681,38 @@ class ADSR(VisualModule):
         else:
             v = 0
         return {"envelope": v}
+
+def image_visualiser(surface, inputs, outputs, module):
+    _,_,w,h = module.visualiser.get_rect()
+    return pygame.transform.scale(module.image, (w,h))
+class ImageIn(VisualModule):
+    name = "Image Input"
+    inputs = {"x": (float, 0.), "y": (float, 0.)}
+    outputs = {"r": float, "g": float, "b": float}
+    settings = {"filename": ("text", "<filename>")}
+    visualiser = ("image", (100,100), image_visualiser)
+    image = None
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.image = pygame.Surface((1,1))
+    def f(self, t, x, y):
+        w,h = self.image.get_size()
+        r,g,b,_ = self.image.get_at((math.floor(((x/2)+0.5)*w),math.floor(((y/2)+0.5)*h)))
+        r = ((r/255)*2)-1
+        g = ((g/255)*2)-1
+        b = ((b/255)*2)-1
+        return {"r": r, "g": g, "b": b}
+    def setting_changed(self):
+        try:
+            self.image = pygame.image.load(self.settings["filename"].value)
+            self.visualiser.aspect_ratio = self.image.get_size()
+        except:
+            self.image = pygame.Surface((1,1))
+        
+        
             
 
-synth = VisualSynth(library = [Osc, Constant, Add, Multiply, EvalExpr, Threshold, Choice, ADSR, PathGen, VideoOut], rate = 100000)
+synth = VisualSynth(library = [Osc, Constant, Add, Multiply, EvalExpr, Threshold, Choice, ADSR, PathGen, VideoOut, ImageIn], rate = 100000)
 window(synth, 30)
 
 
