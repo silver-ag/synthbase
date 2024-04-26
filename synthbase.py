@@ -36,6 +36,7 @@ class Module:
     settings = {}
     current_values = {}
     name = "[module]"
+    error = None
     def __init__(self, synth):
         self.synth = synth
         self.gen_widgets()
@@ -55,7 +56,12 @@ class Module:
             self.inputs[input_name].connection = None
     def invoke(self, inputs, t):
         overall_inputs = {k:(inputs[k] if k in inputs else self.inputs[k].default) for k in self.inputs}
-        outputs = self.f(t = t, **overall_inputs)
+        self.error = None
+        try:
+            outputs = self.f(t = t, **overall_inputs)
+        except Exception as e:
+            self.error = e
+            outputs = {}
         for output, value in outputs.items():
             self.outputs[output].value = value
     def destroy(self):
@@ -86,6 +92,26 @@ class Synth:
         for i in range(n):
             self.step(t_from + ((t_to/n)*i))
 
+
+class RepeatCounter:
+    # object to handle figuring out how many times to do something each tick to achieve a particular rate in hz
+    # always returns 0 on the first call, so it doesn't try to do as many repeats as needed since the system was started
+    # this is because we don't know the value of t during instantiation
+    def __init__(self, rate):
+        self.rate = rate # in hz
+        self.t_last_repeat = 0
+    def repeats(self, t):
+        self.t_last_repeat = t
+        self.repeats = self.real_repeats
+        return 0
+    def real_repeats(self, t):
+        if self.rate > 0:
+            delta_t = t - self.t_last_repeat
+            repetitions = int(delta_t * self.rate)
+            self.t_last_repeat += (repetitions/self.rate)
+            return repetitions
+        else:
+            return 0
 
 
 # VISUAL INTERFACE
@@ -145,6 +171,7 @@ class VisualEnumSetting(Setting):
             index = int((pos[1] - y)/20)
             if index >=0 and index < len(self.options):
                 self.choice = index
+                self.module.setting_changed()
     def get_rect(self):
         return (max([_input.get_rect()[2] for _input in self.module.inputs.values()] + [0]),
                 30 + (self.index*20), self.module.synth.smallfont.size(str(self.value))[0] + 20, 20)
@@ -284,8 +311,12 @@ class VisualModule(Module):
         self.w = width
         surface = pygame.Surface((width, height))
         surface.fill((100,100,100))
-        pygame.draw.rect(surface, (50,50,50), pygame.Rect(0, 0, width, titleheight))
-        title = self.synth.font.render(self.name, True, (250,250,250))
+        if self.error is None:
+            pygame.draw.rect(surface, (50,50,50), pygame.Rect(0, 0, width, titleheight))
+            title = self.synth.font.render(self.name, True, (250,250,250))
+        else:
+            pygame.draw.rect(surface, (100, 50, 50), pygame.Rect(0,0,width,titleheight))
+            title = self.synth.smallfont.render(str(self.error), True, (250,250,250))
         surface.blit(title, (5, 5))
         pygame.draw.line(surface, (250, 250, 250), (width - 18, 2), (width - 2, 18))
         pygame.draw.line(surface, (250, 250, 250), (width - 2, 2), (width - 18, 18))
@@ -446,17 +477,16 @@ class VisualSynth(Synth):
         if self.text_selection is not None:
             self.text_selection.keypress(keyevent)
 
-                                                
-        
 
 def window(synth, framerate):
     screen = pygame.display.set_mode((1280, 720))
     clock = pygame.time.Clock()
     running = True
     t = 0
+    repeat_counter = RepeatCounter(synth.rate)
     while running:
         # do the right amount of iterations to have the specified synth sample rate. rounding errors are possible, which may matter for audio
-        synth.run(math.ceil(synth.rate / framerate), t, 1/framerate)
+        synth.run(repeat_counter.repeats(t), t, 1/framerate)
         t += 1/framerate
 
         # poll for events
@@ -529,68 +559,68 @@ class VideoOut(VisualModule):
 class PathGen(VisualModule):
     name = "Path Generator"
     outputs = {"x": float, "y": float}
-    settings = {"resolution": ("text", "100"),
-                "mode": ("enum", ["vertical", "horizontal", "boustro (v)", "boustro (h)", "spiral"], 0)}
-    pointer = (0,0)
-    sidelen = 100 # used for spiral mode
+    settings = {"resolution": ("text", "300"),
+                "speed": ("text", "1"),
+                "mode": ("enum", ["vertical", "horizontal", "boustro (v)", "boustro (h)", "spiral"], 0),
+                "direction": ("enum", ["forwards", "reverse"], 0)}
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.repeat_counter = RepeatCounter(int(self.settings["speed"].value))
+        self.gen_path()
     def f(self, t):
-        x,y = self.pointer
+        try:
+            res = int(self.settings["resolution"].value)
+            1/res # to make sure res isn't 0
+        except:
+            res = 1
+        speed = float(self.settings["speed"].value)
+        index = min(math.floor(((t%(1/speed))/(1/speed))*len(self.path)), len(self.path)-1)
+        x,y = self.path[index if self.settings["direction"].value == "forwards" else (len(self.path)-index)]
+        return {"x": (x/(res/2))-1, "y": (y/(res/2))-1}
+    def setting_changed(self):
+        try:
+            self.repeat_counter.rate = int(self.settings["speed"].value)
+        except:
+            pass
+        self.gen_path()
+    def gen_path(self):
         try:
             res = int(self.settings["resolution"].value)
             1/res # to make sure res isn't 0
         except:
             res = 1
         mode = self.settings["mode"].value
-        if mode == "horizontal":
-            x = int((x + 1) % res)
-            if x == 0:
-                y = int((y + 1) % res)
-        elif mode == "vertical":
-            y = int((y + 1) % res)
-            if y == 0:
-                x = int((x + 1) % res)
-        elif mode == "boustro (h)":
-            x = int((x + (1 if y % 2 == 0 else -1)) % res)
-            if x == 0:
-                y = int((y + 1) % res)
+        self.path = []
+        if mode == "vertical":
+            for y in range(0, res):
+                for x in range(0, res):
+                    self.path.append((x,y))
+        elif mode == "horizontal":
+            for x in range(0, res):
+                for y in range(0, res):
+                    self.path.append((x,y))
         elif mode == "boustro (v)":
-            y = int((y + (1 if x % 2 == 0 else -1)) % res)
-            if y == 0:
-                x = int((x + 1) % res)
+            for y in range(0, res):
+                for x in range(0, res):
+                    if y % 2 == 0:
+                        self.path.append((x,y))
+                    else:
+                        self.path.append(((res-1)-x, y))
+        elif mode == "boustro (h)":
+            for x in range(0, res):
+                for y in range(0, res):
+                    if x % 2 == 0:
+                        self.path.append((x,y))
+                    else:
+                        self.path.append((x, (res-1)-y))
         elif mode == "spiral":
-            if x == int((res - self.sidelen)/2):
-                if y == int((res - self.sidelen)/2):
-                    self.sidelen = (self.sidelen - 1)
-                    if self.sidelen == 0:
-                        self.sidelen = res
-                    x = int((res - self.sidelen)/2)
-                    y = int((res - self.sidelen)/2)
-                    x += 1
-                else:
-                    y -= 1
-            elif y == int((res - self.sidelen)/2):
-                if x == self.sidelen + int((res - self.sidelen)/2):
-                    y += 1
-                else:
-                    x += 1
-            elif x == self.sidelen + int((res - self.sidelen)/2):
-                if y == self.sidelen + int((res - self.sidelen)/2):
-                    x -= 1
-                else:
-                    y += 1
-            elif y == self.sidelen + int((res - self.sidelen)/2):
-                if x == int((res - self.sidelen)/2):
-                    # this never actually happens, it's just here for clarity
-                    # when we reach (0,100) the first condition kicks in instead, which does the same thing
-                    y -= 1
-                else:
-                    x -= 1
-            else:
-                x = int((res - self.sidelen)/2)
-                y = int((res - self.sidelen)/2)
-        self.pointer = (x,y)
-        return {"x": (x/(res/2))-1, "y": (y/(res/2))-1}
-
+            for sidelen in range(res, 0, -2):
+                margin = (res-sidelen)/2
+                self.path += [(margin + x, margin) for x in range(0, sidelen)]
+                self.path += [(margin + sidelen, margin + y) for y in range(0, sidelen)]
+                self.path += [(margin + sidelen - x, margin + sidelen) for x in range(0, sidelen)]
+                self.path += [(margin, margin + sidelen - y) for y in range(0, sidelen)]
+            self.path.append((res/2,res/2))
 
 class Constant(VisualModule):
     name = "Constant"
@@ -697,7 +727,7 @@ class ImageIn(VisualModule):
         self.image = pygame.Surface((1,1))
     def f(self, t, x, y):
         w,h = self.image.get_size()
-        r,g,b,_ = self.image.get_at((math.floor(((x/2)+0.5)*w),math.floor(((y/2)+0.5)*h)))
+        r,g,b,_ = self.image.get_at((min(math.floor(((x/2)+0.5)*w), w-1), min(math.floor(((y/2)+0.5)*h), h-1)))
         r = ((r/255)*2)-1
         g = ((g/255)*2)-1
         b = ((b/255)*2)-1
